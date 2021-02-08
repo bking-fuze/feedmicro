@@ -14,15 +14,11 @@ import (
 	"log"
 )
 
-type rawGetLogsRequest struct {
-    token      string
-    meetingId  string
-    instanceId string
-    beginTime  string
-    endTime    string
-}
+const (
+	LogLookbackTimeInHours = 3
+)
 
-type preparedGetLogsOperation struct {
+type getLogsOperation struct {
     token      string
     meetingId  int64
     instanceId int64
@@ -30,24 +26,8 @@ type preparedGetLogsOperation struct {
     endTime    time.Time
 }
 
-func prepareGetLogsOperation(rr *rawGetLogsRequest) (*preparedGetLogsOperation, error) {
-	return nil, nil
-}
-
 var sess = session.New()
 var s3svc = s3.New(sess)
-
-/* it is tricky to retrieve logs between startTime and endTime
-   because the logs for an event at time T are usually in a file
-   that started before T, and interesting logs sometimes wind
-   up in subsequent files.
-
-   So, we start listing S3 three hours before startTime, but skip all
-   until the last file prior to startTime.
-  
-   We then include every file up to and including
-   the first file after endTime.
- */
 
 type parsedKey struct {
 	key		  string
@@ -74,64 +54,30 @@ func parseKey(key string) *parsedKey {
 }
 
 type state struct {
-	startTime time.Time
-	endTime time.Time
-	lastKey string
-	printing bool
-	w	io.Writer
-}
-
-func emit(key string, w io.Writer) error {
-	buff := &aws.WriteAtBuffer{}
-	downloader := s3manager.NewDownloaderWithClient(s3svc)
-	numBytes, err := downloader.Download(buff,
-		&s3.GetObjectInput{
-			Bucket: aws.String("mbk-upload-bucket"),
-			Key:    aws.String(key),
-		})
-	if err != nil {
-		return fmt.Errorf("could not download %s: %s", key, err)
-	}
-	zr, err := zip.NewReader(bytes.NewReader(buff.Bytes()), numBytes)
-    if err != nil {
-		return fmt.Errorf("could not read zip: %s", key, err)
-    }
-    for _, f := range zr.File {
-        fr, err := f.Open()
-        if err != nil {
-			return fmt.Errorf("could not read zipentry: %s", key, err)
-        }
-        defer fr.Close()
-		_, err = io.Copy(w, fr)
-		if err != nil {
-			return fmt.Errorf("could not copy zipentry: %s", key, err)
-		}
-		/* hack */
-		w.Write([]byte("\n"))
-    }
-	return nil
+	op        *getLogsOperation
+	prior     string
+	gathered  []string
 }
 
 func handleKey(key string, state *state) bool {
 	pk := parseKey(key)
 	if pk == nil {
-		/* skip files we can't handle */
+		/* we skip keys we don't understand */
 		return true
 	}
-	if !state.printing {
-		if pk.timestamp.After(state.startTime) {
-			if state.lastKey != "" {
-				emit(state.lastKey, state.w)
+	if state.gathered == nil {
+		if pk.timestamp.After(state.op.beginTime) {
+			if state.prior != "" {
+				state.gathered = append(state.gathered, state.prior)
 			}
-			emit(key, state.w)
-			state.printing = true
+			state.gathered = append(state.gathered, key)
 		} else {
-			state.lastKey = key
+			state.prior = key
 		}
 		return true
 	}
-	emit(key, state.w)
-	return !pk.timestamp.After(state.endTime)
+	state.gathered = append(state.gathered, key)
+	return !pk.timestamp.After(state.op.endTime)
 }
 
 func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool {
@@ -146,27 +92,69 @@ func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool 
 	return true
 }
 
-func stream(startTime time.Time, endTime time.Time, w io.Writer) error {
-	state := state{
-		startTime: startTime,
-		endTime: endTime,
-		w: w,
-	}
-	scanTime := startTime.Add(-3 * time.Hour)
-	scanDir := scanTime.Format("date-files/2006/01/02/")
+/* it is tricky to retrieve logs between beginTime and endTime
+   because the logs for an event at time T are usually in a file
+   that started before T, and interesting logs sometimes wind
+   up in subsequent files.
+
+   So, we start listing S3 three hours before beginTime, but skip all
+   until the last file prior to beginTime.
+  
+   We then include every file up to and including
+   the first file after endTime.
+ */
+
+func getLogs(w io.Writer, bucket string, op getLogsOperation) error {
+	state := state{ op: &op }
+	scanTime := op.beginTime.Add(-LogLookbackTimeInHours * time.Hour)
+	scanDir := op.token
+	scanDay := scanTime.Format("/2006/01/02/")
 	scanFile := scanTime.Format("Fuze-2006-01-02-15-04-05")
 	err := s3svc.ListObjectsV2Pages(&s3.ListObjectsV2Input{
-		Bucket: aws.String("mbk-upload-bucket"),
-		Prefix: aws.String("date-files"),
-		StartAfter: aws.String(scanDir + scanFile),
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(scanDir),
+		StartAfter: aws.String(scanDir + scanDay + scanFile),
 	}, func (page *s3.ListObjectsV2Output, lastPage bool) bool {
 		return handlePage(page, lastPage, &state)
 	})
 	if err != nil {
 		return err
 	}
+	for _, key := range state.gathered {
+		err = getSingleLog(w, bucket, key)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func getLogs(w io.Writer, op *preparedGetLogsOperation) {
+func getSingleLog(w io.Writer, bucket string, key string) error {
+	buff := &aws.WriteAtBuffer{}
+	downloader := s3manager.NewDownloaderWithClient(s3svc)
+	numBytes, err := downloader.Download(buff,
+		&s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+	if err != nil {
+		return fmt.Errorf("could not download %s: %s", key, err)
+	}
+	log.Printf("INFO: downloaded %s (%d bytes)", key, numBytes)
+	zr, err := zip.NewReader(bytes.NewReader(buff.Bytes()), numBytes)
+    if err != nil {
+		return fmt.Errorf("could not read zip: %s", key, err)
+    }
+    for _, f := range zr.File {
+        fr, err := f.Open()
+        if err != nil {
+			return fmt.Errorf("could not read zipentry: %s", key, err)
+        }
+        defer fr.Close()
+		_, err = io.Copy(w, fr)
+		if err != nil {
+			return fmt.Errorf("could not copy zipentry: %s", key, err)
+		}
+    }
+	return nil
 }
