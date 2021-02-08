@@ -104,7 +104,7 @@ func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool 
    the first file after endTime.
  */
 
-func getLogs(w io.Writer, bucket string, op getLogsOperation) error {
+func getLogKeys(w io.Writer, bucket string, op getLogsOperation) ([]string, error) {
 	state := state{ op: &op }
 	scanTime := op.beginTime.Add(-LogLookbackTimeInHours * time.Hour)
 	scanDir := op.token
@@ -118,12 +118,18 @@ func getLogs(w io.Writer, bucket string, op getLogsOperation) error {
 		return handlePage(page, lastPage, &state)
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, key := range state.gathered {
-		err = getSingleLog(w, bucket, key)
-		if err != nil {
+	return state.gathered, nil
+}
+
+func getLogs(w io.Writer, bucket string, keys []string) error {
+	for i, key := range keys {
+		if err := getSingleLog(w, bucket, key); err != nil {
 			return err
+		}
+		if i > 100 {
+			return fmt.Errorf("injected error")
 		}
 	}
 	return nil

@@ -16,6 +16,8 @@ func authenticateGetLogs(w http.ResponseWriter, req *http.Request) bool {
 }
 
 func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
+	w.Header().Add("Trailer", "X-Streaming-Error")
+
 	if !authenticateGetLogs(w, req) {
 		return
 	}
@@ -46,9 +48,22 @@ func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
 	zeroTime := time.Time{}
 	if glo.endTime == zeroTime ||
 	   int(glo.endTime.Sub(glo.beginTime).Hours()) > MaxGetLogRangeInHours {
+		log.Printf("ERROR: invalid time range: %s - %s", glo.beginTime, glo.endTime)
 		httpBadRequest(w, req)
 	}
-	getLogs(w, "mbk-upload-bucket", glo)
+	keys, err := getLogKeys(w, "mbk-upload-bucket", glo)
+	if err != nil {
+		log.Printf("ERROR: could not obtain log keys: %s", err)
+		httpInternalServerError(w, req)
+	}
+	err = getLogs(w, "mbk-upload-bucket", keys)
+	if err != nil {
+		log.Printf("ERROR: trouble streaming result: %s", err)
+		w.Header().Set("X-Streaming-Error", "true")
+	} else {
+		log.Printf("INFO: success")
+		w.Header().Set("X-Streaming-Error", "false")
+	}
 }
 
 func logsHandlerPost(w http.ResponseWriter, req *http.Request) {
