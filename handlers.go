@@ -40,8 +40,17 @@ func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if glo.meetingId != 0 || glo.instanceId != 0 {
-		/* normally we would replace begin/end with the values from the meeting */
-		httpInternalServerError(w, req)
+		mi, err := dbGetMeetingInstanceInfo(req.Context(), glo.instanceId)
+		if err != nil {
+			httpInternalServerError(w, req)
+			return
+		}
+		if mi == nil {
+			httpBadRequest(w, req)
+			return
+		}
+		glo.beginTime = mi.startedAt
+		glo.endTime = mi.endedAt
 		return
 	}
 	log.Printf("INFO: glo: %+v", glo)
@@ -50,11 +59,13 @@ func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
 	   int(glo.endTime.Sub(glo.beginTime).Hours()) > MaxGetLogRangeInHours {
 		log.Printf("ERROR: invalid time range: %s - %s", glo.beginTime, glo.endTime)
 		httpBadRequest(w, req)
+		return
 	}
 	keys, err := getLogKeys(w, "mbk-upload-bucket", glo)
 	if err != nil {
 		log.Printf("ERROR: could not obtain log keys: %s", err)
 		httpInternalServerError(w, req)
+		return
 	}
 	err = getLogs(w, "mbk-upload-bucket", keys)
 	if err != nil {
