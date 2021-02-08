@@ -16,6 +16,7 @@ import (
 
 const (
 	LogLookbackTimeInHours = 3
+	MaxDownloadRetries = 20
 )
 
 type getLogsOperation struct {
@@ -28,6 +29,7 @@ type getLogsOperation struct {
 
 var sess = session.New()
 var s3svc = s3.New(sess)
+var s3downloader = s3manager.NewDownloaderWithClient(s3svc)
 
 type parsedKey struct {
 	key		  string
@@ -73,17 +75,15 @@ func handleKey(key string, state *state) bool {
 			state.gathered = append(state.gathered, key)
 		} else {
 			state.prior = key
+			return true
 		}
-		return true
+	} else {
+		state.gathered = append(state.gathered, key)
 	}
-	state.gathered = append(state.gathered, key)
 	return !pk.timestamp.After(state.op.endTime)
 }
 
 func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool {
-	if *page.KeyCount == 0 {
-		return true
-	}
 	for _, item := range page.Contents {
 		if !handleKey(*item.Key, state) {
 			return false
@@ -124,27 +124,41 @@ func getLogKeys(w io.Writer, bucket string, op getLogsOperation) ([]string, erro
 }
 
 func getLogs(w io.Writer, bucket string, keys []string) error {
-	for i, key := range keys {
-		if err := getSingleLog(w, bucket, key); err != nil {
+	errorCount := 0
+	for _, key := range keys {
+		if err := getSingleLog(w, bucket, key, &errorCount); err != nil {
 			return err
-		}
-		if i > 100 {
-			return fmt.Errorf("injected error")
 		}
 	}
 	return nil
 }
 
-func getSingleLog(w io.Writer, bucket string, key string) error {
+func retryDownload(buff *aws.WriteAtBuffer, bucket string, key string, perrorCount *int) (numBytes int64, err error) {
+	for {
+		numBytes, err = s3downloader.Download(buff,
+			&s3.GetObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(key),
+			})
+		if err == nil {
+			return
+		}
+		*perrorCount++
+		log.Printf("ERROR: downloading %s: %s (try %d of %d)", key, err, *perrorCount, MaxDownloadRetries)
+		if *perrorCount == MaxDownloadRetries {
+			log.Printf("ERROR: giving up after %d retries", MaxDownloadRetries)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+
+func getSingleLog(w io.Writer, bucket string, key string, perrorCount *int) error {
 	buff := &aws.WriteAtBuffer{}
-	downloader := s3manager.NewDownloaderWithClient(s3svc)
-	numBytes, err := downloader.Download(buff,
-		&s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-		})
+	numBytes, err := retryDownload(buff, bucket, key, perrorCount)
 	if err != nil {
-		return fmt.Errorf("could not download %s: %s", key, err)
+		return err
 	}
 	log.Printf("INFO: downloaded %s (%d bytes)", key, numBytes)
 	zr, err := zip.NewReader(bytes.NewReader(buff.Bytes()), numBytes)
