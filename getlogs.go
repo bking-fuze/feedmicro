@@ -104,7 +104,7 @@ func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool 
    the first file after endTime.
  */
 
-func getLogKeys(w io.Writer, bucket string, op getLogsOperation) ([]string, error) {
+func getLogKeys(bucket string, op getLogsOperation) ([]string, error) {
 	state := state{ op: &op }
 	scanTime := op.beginTime.Add(-LogLookbackTimeInHours * time.Hour)
 	scanDir := op.token
