@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"fmt"
+	"time"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -53,4 +55,12 @@ func awsUpload(bucket string, key string, r io.Reader) (string, error) {
 		return "", err
 	}
 	return result.Location, nil
+}
+
+func awsMakeSignedUrl(bucket string, key string) (string, error) {
+	req, _ := s3svc.PutObjectRequest(&s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	if req == nil {
+		return "", fmt.Errorf("could not prepare request for signing %s:%s", bucket, key)
+	}
+	return req.Presign(24 * time.Hour)
 }

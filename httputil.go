@@ -44,3 +44,7 @@ func httpBadRequest(w http.ResponseWriter, req *http.Request) {
 func httpInternalServerError(w http.ResponseWriter, req *http.Request) {
 	http.Error(w, "Internal Server Error", 500)
 }
+
+func httpForbidden(w http.ResponseWriter, req *http.Request) {
+	http.Error(w, "Forbidden", 403)
+}

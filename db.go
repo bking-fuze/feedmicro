@@ -50,3 +50,36 @@ func dbGetMeetingInstanceInfo(ctx context.Context, id int64) (*meetingInstanceIn
 		}, nil
 	}
 }
+
+func dbDeviceExists(ctx context.Context, deviceId string) (bool, error) {
+	var one int
+	err := DB.QueryRowContext(ctx, "SELECT 1 FROM device WHERE id=?", deviceId).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func dbQueryForTime(ctx context.Context, query string, args ...interface{}) (*time.Time, error) {
+	var t mysql.NullTime
+	err := DB.QueryRowContext(ctx, query, args...).Scan(&t)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	} else if !t.Valid {
+		return nil, nil
+	} else {
+		return &t.Time, nil
+	}
+}
+
+func dbDownloadTokenCreatedAt(ctx context.Context, downloadToken string) (*time.Time, error) {
+	return dbQueryForTime(ctx, "SELECT created_at FROM launch_tokens WHERE token=?", downloadToken)
+}
+
+func dbMeetingInstanceStartedAt(ctx context.Context, id int64) (*time.Time, error) {
+	return dbQueryForTime(ctx, "SELECT started_at FROM meeting_instances WHERE id=?", id)
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"time"
+	"net/http"
 	"bytes"
 	"regexp"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 )
 
 const (
+	MaxGetLogRangeInHours = 14
 	LogLookbackTimeInHours = 3
 	MaxDownloadRetries = 20
 )
@@ -154,4 +156,69 @@ func getSingleLog(w io.Writer, bucket string, key string, perrorCount *int) erro
 		}
     }
 	return nil
+}
+
+func authenticateGetLogs(w http.ResponseWriter, req *http.Request) bool {
+	return true
+}
+
+func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
+	if !authenticateGetLogs(w, req) {
+		return
+	}
+	var err error
+	q := req.URL.Query()
+	glo := getLogsOperation{};
+	queryStringItem(q, "token", &glo.token)
+	queryInt64Item(q, "meeting_id", &glo.meetingId, &err)
+	queryInt64Item(q, "instance_id", &glo.instanceId, &err)
+	queryRFC3339Item(q, "begin_time", &glo.beginTime, &err)
+	queryRFC3339Item(q, "end_time", &glo.endTime, &err)
+	if err != nil {
+		log.Printf("ERROR: malformed query: %s", err)
+		httpBadRequest(w, req)
+		return
+	}
+	if glo.token == "" {
+		log.Printf("ERROR: missing token")
+		httpBadRequest(w, req)
+		return
+	}
+	if glo.meetingId != 0 || glo.instanceId != 0 {
+		mi, err := dbGetMeetingInstanceInfo(req.Context(), glo.instanceId)
+		if err != nil {
+			log.Printf("ERROR: could not read start/end times for instance %d: %s", glo.instanceId, err)
+			httpInternalServerError(w, req)
+			return
+		}
+		if mi == nil {
+			log.Printf("WARN: no meeting instance for id %d", glo.instanceId)
+			httpBadRequest(w, req)
+			return
+		}
+		glo.beginTime = mi.startedAt
+		glo.endTime = mi.endedAt
+	}
+	zeroTime := time.Time{}
+	if glo.endTime == zeroTime ||
+	   int(glo.endTime.Sub(glo.beginTime).Hours()) > MaxGetLogRangeInHours {
+		log.Printf("ERROR: invalid time range: %s - %s", glo.beginTime, glo.endTime)
+		httpBadRequest(w, req)
+		return
+	}
+	keys, err := getLogKeys("mbk-upload-bucket", glo)
+	if err != nil {
+		log.Printf("ERROR: could not obtain log keys: %s", err)
+		httpInternalServerError(w, req)
+		return
+	}
+	w.Header().Add("Trailer", "X-Streaming-Error")
+	err = getLogs(w, "mbk-upload-bucket", keys)
+	if err != nil {
+		log.Printf("ERROR: trouble streaming result: %s", err)
+		w.Header().Set("X-Streaming-Error", "true")
+	} else {
+		log.Printf("INFO: success")
+		w.Header().Set("X-Streaming-Error", "false")
+	}
 }
