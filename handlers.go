@@ -44,16 +44,17 @@ func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
 	if glo.meetingId != 0 || glo.instanceId != 0 {
 		mi, err := dbGetMeetingInstanceInfo(req.Context(), glo.instanceId)
 		if err != nil {
+			log.Printf("ERROR: could not read start/end times for instance %d: %s", glo.instanceId, err)
 			httpInternalServerError(w, req)
 			return
 		}
 		if mi == nil {
+			log.Printf("WARN: no meeting instance for id %d", glo.instanceId)
 			httpBadRequest(w, req)
 			return
 		}
 		glo.beginTime = mi.startedAt
 		glo.endTime = mi.endedAt
-		return
 	}
 	zeroTime := time.Time{}
 	if glo.endTime == zeroTime ||
@@ -79,12 +80,19 @@ func logsHandlerGet(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func authenticatePostLogs(w http.ResponseWriter, req *http.Request) bool {
+	return true
+}
+
 type logsPostResponse struct {
 	URL  string `json:"url"`
 	Code int    `json:"code"`
 }
 
 func logsHandlerPost(w http.ResponseWriter, req *http.Request) {
+	if !authenticatePostLogs(w, req) {
+		return
+	}
 	var r io.Reader
 	var token string
 	var err error
@@ -125,23 +133,25 @@ func logsHandlerPost(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	tz := req.URL.Query().Get("tz")
-
-	url, err := putLog(req.Context(), token, tz, r)
+	url, err := putLog(req.Context(), &putLogHeader{
+		Token: token,
+		TimeZone: req.URL.Query().Get("tz"),
+		Encoding: req.Header.Get("Content-Encoding"),
+	}, r)
 	if err != nil {
 		log.Printf("ERROR: could not process request: %s", err)
 		httpInternalServerError(w, req)
 		return
 	}
 
-	/* I'd prefer not to leak the URL, but that's the existing behavior */
+	/* I'd prefer not to leak the URL, but that's the existing interface */
 	response, err := json.Marshal(&logsPostResponse{ URL: url, Code: 200 })
 	if err != nil {
 		log.Printf("ERROR: could marshal response: %s", err)
 		httpInternalServerError(w, req)
 		return
 	}
-	n, err := w.Write(response)
+	_, err = w.Write(response)
 	if err != nil {
 		log.Printf("ERROR: could not write response: %s", err)
 	}

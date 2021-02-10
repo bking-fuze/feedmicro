@@ -2,15 +2,11 @@ package main
 
 import (
 	"io"
-	"bytes"
 	"time"
+	"bytes"
 	"regexp"
 	"fmt"
 	"archive/zip"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"log"
 )
 
@@ -26,10 +22,6 @@ type getLogsOperation struct {
     beginTime  time.Time
     endTime    time.Time
 }
-
-var sess = session.New()
-var s3svc = s3.New(sess)
-var s3downloader = s3manager.NewDownloaderWithClient(s3svc)
 
 type parsedKey struct {
 	key		  string
@@ -83,15 +75,6 @@ func handleKey(key string, state *state) bool {
 	return !pk.timestamp.After(state.op.endTime)
 }
 
-func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool {
-	for _, item := range page.Contents {
-		if !handleKey(*item.Key, state) {
-			return false
-		}
-	}
-	return true
-}
-
 /* it is tricky to retrieve logs between beginTime and endTime
    because the logs for an event at time T are usually in a file
    that started before T, and interesting logs sometimes wind
@@ -105,18 +88,17 @@ func handlePage(page *s3.ListObjectsV2Output, lastPage bool, state *state) bool 
  */
 
 func getLogKeys(bucket string, op getLogsOperation) ([]string, error) {
+	log.Printf("INFO: using time range: %s - %s", op.beginTime.Format(time.RFC3339), op.endTime.Format(time.RFC3339))
 	state := state{ op: &op }
 	scanTime := op.beginTime.Add(-LogLookbackTimeInHours * time.Hour)
 	scanDir := op.token
-	scanDay := scanTime.Format("/2006/01/02/")
-	scanFile := scanTime.Format("Fuze-2006-01-02-15-04-05")
-	err := s3svc.ListObjectsV2Pages(&s3.ListObjectsV2Input{
-		Bucket: aws.String(bucket),
-		Prefix: aws.String(scanDir),
-		StartAfter: aws.String(scanDir + scanDay + scanFile),
-	}, func (page *s3.ListObjectsV2Output, lastPage bool) bool {
-		return handlePage(page, lastPage, &state)
-	})
+	startDay := scanTime.Format("/2006/01/02/")
+	startFile := scanTime.Format("Fuze-2006-01-02-15-04-05")
+	startAfter := scanDir + startDay + startFile
+	err := awsList(bucket, scanDir, startAfter, 
+		func (key string) bool {
+			return handleKey(key, &state)
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -133,13 +115,9 @@ func getLogs(w io.Writer, bucket string, keys []string) error {
 	return nil
 }
 
-func retryDownload(buff *aws.WriteAtBuffer, bucket string, key string, perrorCount *int) (numBytes int64, err error) {
+func retryDownload(bucket string, key string, perrorCount *int) (buff []byte, numBytes int64, err error) {
 	for {
-		numBytes, err = s3downloader.Download(buff,
-			&s3.GetObjectInput{
-				Bucket: aws.String(bucket),
-				Key:    aws.String(key),
-			})
+		buff, numBytes, err = awsDownload(bucket, key)
 		if err == nil {
 			return
 		}
@@ -155,13 +133,12 @@ func retryDownload(buff *aws.WriteAtBuffer, bucket string, key string, perrorCou
 
 
 func getSingleLog(w io.Writer, bucket string, key string, perrorCount *int) error {
-	buff := &aws.WriteAtBuffer{}
-	numBytes, err := retryDownload(buff, bucket, key, perrorCount)
+	buff, numBytes, err := retryDownload(bucket, key, perrorCount)
 	if err != nil {
 		return err
 	}
 	log.Printf("INFO: downloaded %s (%d bytes)", key, numBytes)
-	zr, err := zip.NewReader(bytes.NewReader(buff.Bytes()), numBytes)
+	zr, err := zip.NewReader(bytes.NewReader(buff), numBytes)
     if err != nil {
 		return fmt.Errorf("could not read zip: %s", key, err)
     }

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	"time"
 	"fmt"
 )
@@ -32,8 +32,8 @@ type meetingInstanceInfo struct {
 }
 
 func dbGetMeetingInstanceInfo(ctx context.Context, id int64) (*meetingInstanceInfo, error) {
-	var startedAt sql.NullTime
-	var endedAt sql.NullTime
+	var startedAt mysql.NullTime
+	var endedAt mysql.NullTime
 	err := DB.QueryRowContext(ctx, "SELECT started_at, ended_at FROM meeting_instances WHERE id=? and state='Ended'", id).Scan(&startedAt, &endedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
