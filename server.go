@@ -29,7 +29,7 @@ func healthHandler(w http.ResponseWriter, req *http.Request) {
 func logUploadURLHandler(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 		case "GET":
-//			logUploadURLHandlerGet(w, req)
+			logUploadURLHandlerGet(w, req)
 		default:
 			httpBadRequest(w, req)
 	}
