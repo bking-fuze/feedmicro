@@ -6,17 +6,25 @@ import (
 	"net/http"
 )
 
-func logsHandler(w http.ResponseWriter, req *http.Request) {
+func logsV1Handler(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 		case "GET":
 			logsGet(req)(w)
 		case "POST":
-			logsPost(req)(w)
+			logsV1Post(req)(w)
 		default:
 			httpBadRequest(w)
 	}
 }
 
+func logsV2Handler(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+		case "POST":
+			logsV2Post(req)(w)
+		default:
+			httpBadRequest(w)
+	}
+}
 func healthHandler(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 		case "GET":
@@ -43,8 +51,8 @@ func main() {
 	}
 	defer dbClose()
 	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/v1/logs", logsHandler)
-	http.HandleFunc("/v2/logs", logsHandler)
+	http.HandleFunc("/v1/logs", logsV1Handler)
+	http.HandleFunc("/v2/logs", logsV2Handler)
 	http.HandleFunc("/v1/log_upload_url", logUploadURLHandler)
 	http.ListenAndServe(":8080", nil)
 }

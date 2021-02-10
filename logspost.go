@@ -63,7 +63,7 @@ type logsPostResponse struct {
 	Code int    `json:"code"`
 }
 
-func logsPost(req *http.Request) func(http.ResponseWriter) {
+func logsV1Post(req *http.Request) func(http.ResponseWriter) {
     token := req.Header.Get("FZ-Devicetoken")
 	if token == "" {
 		return httpForbidden
@@ -74,7 +74,14 @@ func logsPost(req *http.Request) func(http.ResponseWriter) {
 	} else if !ok {
 		return httpForbidden
 	}
+	return logsPost(token, req)
+}
 
+func logsV2Post(req *http.Request) func(http.ResponseWriter) {
+	return httpInternalServerError
+}
+
+func logsPost(token string, req *http.Request) func(http.ResponseWriter) {
 	/* I believe that in production no one uses multipart;
 	   we should clean this up at some point, so I am logging
 	   the content-type */
