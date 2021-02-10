@@ -9,11 +9,11 @@ import (
 func logsHandler(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 		case "GET":
-			logsHandlerGet(w, req)
+			logsGet(req)(w)
 		case "POST":
-			logsHandlerPost(w, req)
+			logsPost(req)(w)
 		default:
-			httpBadRequest(w, req)
+			httpBadRequest(w)
 	}
 }
 
@@ -22,16 +22,16 @@ func healthHandler(w http.ResponseWriter, req *http.Request) {
 		case "GET":
 			fmt.Fprintf(w, "ok\n")
 		default:
-			httpBadRequest(w, req)
+			httpBadRequest(w)
 	}
 }
 
 func logUploadURLHandler(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 		case "GET":
-			logUploadURLHandlerGet(w, req)
+			logUploadURLGet(req)(w)
 		default:
-			httpBadRequest(w, req)
+			httpBadRequest(w)
 	}
 }
 

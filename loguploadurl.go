@@ -84,7 +84,7 @@ type structuredResponse struct {
 	ContentType   string  `json:"content_type"`
 }
 
-func logUploadURLHandlerGet(w http.ResponseWriter, req *http.Request) {
+func logUploadURLGet(req *http.Request) func(w http.ResponseWriter) {
 	ctx := req.Context()
 	q := req.URL.Query()
 	uur := uploadURLRequest{}
@@ -115,12 +115,10 @@ func logUploadURLHandlerGet(w http.ResponseWriter, req *http.Request) {
 		ok, err = checkDownloadToken(ctx, uur.downloadToken)
 	}
 	if err != nil {
-		httpInternalServerError(w, req)
-		return
+		return httpInternalServerError
 	}
 	if !ok {
-		httpForbidden(w, req)
-		return
+		return httpForbidden
 	}
 
 	/* special handling of parameters */
@@ -134,8 +132,7 @@ func logUploadURLHandlerGet(w http.ResponseWriter, req *http.Request) {
 		if len(uur.token) > 0 || len(uur.deviceId) > 0 {
 			err = readMeetingDate(ctx, &uur)
 			if err != nil {
-				httpInternalServerError(w, req)
-				return
+				return httpInternalServerError
 			}
 		}
 	}
@@ -146,8 +143,7 @@ func logUploadURLHandlerGet(w http.ResponseWriter, req *http.Request) {
 	s3key := patternFunc(uur)
 	signedUrl, err := awsMakeSignedUrl("mbk-upload-bucket", s3key)
 	if err != nil {
-		httpInternalServerError(w, req)
-		return
+		return httpInternalServerError
 	}
 
 	body, err := json.Marshal(&structuredResponse{
@@ -157,12 +153,12 @@ func logUploadURLHandlerGet(w http.ResponseWriter, req *http.Request) {
 		ContentType:   uur.contentType,
 	})
 	if err != nil {
-		httpInternalServerError(w, req)
-		return
+		return httpInternalServerError
 	}
-	_, err = w.Write(body)
-	if err != nil {
-		httpInternalServerError(w, req)
-		return
+	return func(w http.ResponseWriter) {
+		_, err = w.Write(body)
+		if err != nil {
+			log.Printf("ERROR could not write body: %s", err)
+		}
 	}
 }

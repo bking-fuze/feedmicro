@@ -67,10 +67,12 @@ type logsPostResponse struct {
 	Code int    `json:"code"`
 }
 
-func logsHandlerPost(w http.ResponseWriter, req *http.Request) {
+func logsPost(req *http.Request) func(http.ResponseWriter) {
+/*
 	if !authenticatePostLogs(w, req) {
 		return
 	}
+ */
 	var r io.Reader
 	var token string
 	var err error
@@ -90,25 +92,21 @@ func logsHandlerPost(w http.ResponseWriter, req *http.Request) {
 			file, _, err := req.FormFile("request")
 			if err == http.ErrMissingFile {
 				log.Printf("INFO: missing file", ct)
-				httpBadRequest(w, req)
-				return
+				return httpBadRequest
 			} else if err != nil {
-				httpInternalServerError(w, req)
-				return
+				return httpInternalServerError
 			}
     		defer file.Close()
 			r = file
 			token = req.FormValue("token")
 		default:
 			log.Printf("INFO: illegal content-type: %s", ct)
-			httpBadRequest(w, req)
-			return
+			return httpBadRequest
 	}
 
 	if token == "" {
 		log.Printf("INFO: missing token")
-		httpBadRequest(w, req)
-		return
+		return httpBadRequest
 	}
 
 	url, err := putLog(req.Context(), &putLogHeader{
@@ -118,19 +116,19 @@ func logsHandlerPost(w http.ResponseWriter, req *http.Request) {
 	}, r)
 	if err != nil {
 		log.Printf("ERROR: could not process request: %s", err)
-		httpInternalServerError(w, req)
-		return
+		return httpInternalServerError
 	}
 
 	/* I'd prefer not to leak the URL, but that's the existing interface */
 	response, err := json.Marshal(&logsPostResponse{ URL: url, Code: 200 })
 	if err != nil {
 		log.Printf("ERROR: could marshal response: %s", err)
-		httpInternalServerError(w, req)
-		return
+		return httpInternalServerError
 	}
-	_, err = w.Write(response)
-	if err != nil {
-		log.Printf("ERROR: could not write response: %s", err)
+	return func(w http.ResponseWriter) {
+		_, err = w.Write(response)
+		if err != nil {
+			log.Printf("ERROR: could not write response: %s", err)
+		}
 	}
 }

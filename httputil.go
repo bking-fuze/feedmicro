@@ -37,14 +37,14 @@ func queryInt64Item(values url.Values, name string, pint *int64, perr *error) {
 	*pint, *perr = strconv.ParseInt(value, 10, 64)
 }
 
-func httpBadRequest(w http.ResponseWriter, req *http.Request) {
+func httpBadRequest(w http.ResponseWriter) {
 	http.Error(w, "Bad Request", 400)
 }
 
-func httpInternalServerError(w http.ResponseWriter, req *http.Request) {
+func httpInternalServerError(w http.ResponseWriter) {
 	http.Error(w, "Internal Server Error", 500)
 }
 
-func httpForbidden(w http.ResponseWriter, req *http.Request) {
+func httpForbidden(w http.ResponseWriter) {
 	http.Error(w, "Forbidden", 403)
 }
