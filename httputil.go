@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"net/url"
 	"net/http"
 	"time"
 	"strconv"
+	"log"
 )
 
 func queryStringItem(values url.Values, name string, pstr *string) {
@@ -47,4 +49,18 @@ func httpInternalServerError(w http.ResponseWriter) {
 
 func httpForbidden(w http.ResponseWriter) {
 	http.Error(w, "Forbidden", 403)
+}
+
+func jsonResponse(resp interface{}) func(w http.ResponseWriter) {
+	body, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("ERROR could not marshal response: %s", err)
+		return httpInternalServerError
+	}
+	return func(w http.ResponseWriter) {
+		_, err = w.Write(body)
+		if err != nil {
+			log.Printf("ERROR could not write response: %s", err)
+		}
+	}
 }

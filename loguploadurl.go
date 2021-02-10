@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -146,19 +145,10 @@ func logUploadURLGet(req *http.Request) func(w http.ResponseWriter) {
 		return httpInternalServerError
 	}
 
-	body, err := json.Marshal(&structuredResponse{
+	return jsonResponse(&structuredResponse{
 		SignedRequest: signedUrl,
 		Message:       "",
 		Code:          200,
 		ContentType:   uur.contentType,
 	})
-	if err != nil {
-		return httpInternalServerError
-	}
-	return func(w http.ResponseWriter) {
-		_, err = w.Write(body)
-		if err != nil {
-			log.Printf("ERROR could not write body: %s", err)
-		}
-	}
 }

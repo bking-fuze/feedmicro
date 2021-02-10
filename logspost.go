@@ -58,36 +58,34 @@ const (
 	MaxInMemoryMultipartMB = 8
 )
 
-func authenticatePostLogs(w http.ResponseWriter, req *http.Request) bool {
-	return true
-}
-
 type logsPostResponse struct {
 	URL  string `json:"url"`
 	Code int    `json:"code"`
 }
 
 func logsPost(req *http.Request) func(http.ResponseWriter) {
-/*
-	if !authenticatePostLogs(w, req) {
-		return
+    token := req.Header.Get("FZ-Devicetoken")
+	if token == "" {
+		return httpForbidden
 	}
- */
-	var r io.Reader
-	var token string
-	var err error
+	ok, err := checkDeviceId(req.Context(), token)
+	if err != nil {
+		return httpInternalServerError
+	} else if !ok {
+		return httpForbidden
+	}
 
 	/* I believe that in production no one uses multipart;
 	   we should clean this up at some point, so I am logging
 	   the content-type */
     ct := req.Header.Get("Content-Type")
 	log.Printf("INFO: content-type: %s", ct)
+	var r io.Reader
 	switch {
 		case strings.HasPrefix(ct, "application/json"):
 			fallthrough
 		case strings.HasPrefix(ct, "text/plain"):
 			r = req.Body
-			token = req.URL.Query().Get("token")
 		case strings.HasPrefix(ct, "multipart/"):
 			file, _, err := req.FormFile("request")
 			if err == http.ErrMissingFile {
@@ -98,15 +96,9 @@ func logsPost(req *http.Request) func(http.ResponseWriter) {
 			}
     		defer file.Close()
 			r = file
-			token = req.FormValue("token")
 		default:
 			log.Printf("INFO: illegal content-type: %s", ct)
 			return httpBadRequest
-	}
-
-	if token == "" {
-		log.Printf("INFO: missing token")
-		return httpBadRequest
 	}
 
 	url, err := putLog(req.Context(), &putLogHeader{
@@ -119,16 +111,6 @@ func logsPost(req *http.Request) func(http.ResponseWriter) {
 		return httpInternalServerError
 	}
 
-	/* I'd prefer not to leak the URL, but that's the existing interface */
-	response, err := json.Marshal(&logsPostResponse{ URL: url, Code: 200 })
-	if err != nil {
-		log.Printf("ERROR: could marshal response: %s", err)
-		return httpInternalServerError
-	}
-	return func(w http.ResponseWriter) {
-		_, err = w.Write(response)
-		if err != nil {
-			log.Printf("ERROR: could not write response: %s", err)
-		}
-	}
+	/* I'd prefer not to return the URL, but that's the existing interface */
+	return jsonResponse(&logsPostResponse{ URL: url, Code: 200 })
 }
