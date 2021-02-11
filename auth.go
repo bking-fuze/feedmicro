@@ -35,3 +35,9 @@ func checkDownloadToken(ctx context.Context, downloadToken string) (bool, error)
 	}
 	return true, nil
 }
+
+/*
+func checkDeviceAndSession(ctx context.Context, downloadToken string) (string, bool, error) {
+	return "", false, nil
+}
+ */

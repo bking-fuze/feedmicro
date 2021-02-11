@@ -14,11 +14,12 @@ import (
 )
 
 const (
+	MaxInMemoryMultipartMB = 8
 	fileHeader = "log 1"
 	newline = "\n"
 )
 
-type putLogHeader struct {
+type storedLogHeader struct {
 	Token     string `json:"token"`
 	TimeZone  string `json:"tz"`
 	Encoding  string `json:"encoding"`
@@ -33,7 +34,7 @@ func randomKey() (string, error) {
     return fmt.Sprintf("/inbound/%s", hex.EncodeToString(randId)), nil
 }
 
-func putLog(context context.Context, header *putLogHeader, r io.Reader) (string, error) {
+func queueLog(context context.Context, header *storedLogHeader, r io.Reader) (string, error) {
 	hbytes, err := json.Marshal(header)
 	if err != nil {
 		return "", err
@@ -53,10 +54,6 @@ func putLog(context context.Context, header *putLogHeader, r io.Reader) (string,
 	}
 	return url, nil
 }
-
-const (
-	MaxInMemoryMultipartMB = 8
-)
 
 type logsPostResponse struct {
 	URL  string `json:"url"`
@@ -78,15 +75,18 @@ func logsV1Post(req *http.Request) func(http.ResponseWriter) {
 }
 
 func logsV2Post(req *http.Request) func(http.ResponseWriter) {
-	return httpInternalServerError
+	//token, ok, err := checkDeviceAndSession(req)
+	token, ok, err := "x", true, error(nil)
+	if err != nil {
+		return httpInternalServerError
+	} else if !ok {
+		return httpForbidden
+	}
+	return logsPost(token, req)
 }
 
 func logsPost(token string, req *http.Request) func(http.ResponseWriter) {
-	/* I believe that in production no one uses multipart;
-	   we should clean this up at some point, so I am logging
-	   the content-type */
     ct := req.Header.Get("Content-Type")
-	log.Printf("INFO: content-type: %s", ct)
 	var r io.Reader
 	switch {
 		case strings.HasPrefix(ct, "application/json"):
@@ -94,6 +94,10 @@ func logsPost(token string, req *http.Request) func(http.ResponseWriter) {
 		case strings.HasPrefix(ct, "text/plain"):
 			r = req.Body
 		case strings.HasPrefix(ct, "multipart/"):
+			/* I believe that in production no one uses multipart;
+			   we should clean this up at some point, so I am logging
+			   the content-type */
+			log.Printf("INFO: multipart content-type: %s", ct)
 			file, _, err := req.FormFile("request")
 			if err == http.ErrMissingFile {
 				log.Printf("INFO: missing file", ct)
@@ -108,7 +112,7 @@ func logsPost(token string, req *http.Request) func(http.ResponseWriter) {
 			return httpBadRequest
 	}
 
-	url, err := putLog(req.Context(), &putLogHeader{
+	url, err := queueLog(req.Context(), &storedLogHeader{
 		Token: token,
 		TimeZone: req.URL.Query().Get("tz"),
 		Encoding: req.Header.Get("Content-Encoding"),

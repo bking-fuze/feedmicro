@@ -51,6 +51,9 @@ func httpForbidden(w http.ResponseWriter) {
 	http.Error(w, "Forbidden", 403)
 }
 
+func httpOk(w http.ResponseWriter) {
+}
+
 func jsonResponse(resp interface{}) func(w http.ResponseWriter) {
 	body, err := json.Marshal(resp)
 	if err != nil {
